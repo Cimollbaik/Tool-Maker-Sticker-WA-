@@ -14,13 +14,14 @@ h2{font-size:16px;margin:0 0 8px;font-weight:900}
 .btn.pk{background:var(--pk);color:#fff;font-size:18px;padding:16px}
 .btn.sm{display:inline-block;width:auto;padding:6px 10px;font-size:13px;box-shadow:2px 2px 0 var(--ink);background:#fff}
 .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+.two{display:flex;gap:8px;margin-bottom:10px}.two .btn{padding:10px;font-size:14px}
 .cvw{width:min(100%,380px);aspect-ratio:1;margin:0 auto 10px;border:3px solid var(--ink);border-radius:14px;overflow:hidden;background:repeating-conic-gradient(#d9d4ec 0 25%,#fff 0 50%) 0 0/24px 24px}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 .r{display:flex;gap:8px;align-items:center;margin:8px 0}.r label{min-width:76px}
 .r input[type=range]{flex:1;accent-color:var(--pk)}
 input[type=text],select{flex:1;min-width:0;border:3px solid var(--ink);border-radius:10px;padding:8px;font:inherit;background:#fff;color:var(--ink)}
 input[type=color]{width:44px;height:36px;border:3px solid var(--ink);border-radius:10px;padding:0}
-#st{margin:10px 0;padding:10px;border-radius:12px;background:#fff6c9;border:2px dashed var(--ink);display:none}
+.st{margin:10px 0;padding:10px;border-radius:12px;background:#fff6c9;border:2px dashed var(--ink);display:none;word-break:break-word}
 .bg{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .bub{padding:14px;border-radius:14px;width:150px;height:150px}.bub img{width:100%;height:100%;object-fit:contain}
 .tabs{display:flex;gap:8px;margin-bottom:10px}.tabs .btn{background:#fff}.tabs .on{background:var(--pk);color:#fff}
@@ -39,6 +40,8 @@ input[type=color]{width:44px;height:36px;border:3px solid var(--ink);border-radi
 
 <div class="c">
 <h2>2. Atur tampilan</h2>
+<div class="two"><button class="btn" id="cut">Hapus latar (AI)</button><button class="btn" id="unc" style="background:#fff">Kembalikan asli</button></div>
+<div class="st" id="sa"></div>
 <div class="cvw"><canvas id="cv" width="512" height="512"></canvas></div>
 <div class="r"><label>Bentuk</label><select id="fit"><option value="fit">Muat utuh (transparan)</option><option value="fill">Penuhi kotak</option></select></div>
 <div class="r"><label>Zoom</label><input id="zoom" type="range" min="40" max="300" value="100"></div>
@@ -49,12 +52,12 @@ input[type=color]{width:44px;height:36px;border:3px solid var(--ink);border-radi
 <div class="r"><label>Mulai</label><input id="sts" type="range" min="0" max="10" step="0.1" value="0"></div>
 <div class="r"><label>Durasi</label><input id="ln" type="range" min="1" max="3" step="0.5" value="2"></div>
 </div>
-<p class="s">Geser gambar di kotak untuk mengatur posisi.</p>
+<p class="s">Geser gambar di kotak untuk mengatur posisi. Hapus latar terbaik untuk foto orang.</p>
 </div>
 
 <div class="c">
 <button class="btn pk" id="go">3. Buat Stiker</button>
-<div id="st"></div>
+<div class="st" id="sb"></div>
 <div class="bg" id="res"></div>
 </div>
 
@@ -73,11 +76,15 @@ var $=function(i){return document.getElementById(i)};
 var cv=$('cv'),cx=cv.getContext('2d',{willReadFrequently:true});
 var L=document.createElement('canvas');L.width=L.height=512;var lx=L.getContext('2d');
 var S=document.createElement('canvas');S.width=S.height=512;var sx=S.getContext('2d');
-var src=null,pan={x:0,y:0},lib=null,libErr=false,db=null,items=[],tab=false,curT=0;
-var LIB='https://cdn.jsdelivr.net/npm/wasm-webp@0.1.0/dist/esm/index.js';
+var src=null,pan={x:0,y:0},lib=null,errs=[],seg=null,db=null,items=[],tab=false,curT=0;
 
-function msg(t,c){var e=$('st');e.style.display=t?'block':'none';e.className=c||'';e.textContent=t||''}
+function msg(t,c,w){
+  $('sa').style.display=$('sb').style.display='none';
+  if(!t)return;
+  var e=$(w==='a'?'sa':'sb');e.style.display='block';e.className='st '+(c||'');e.textContent=t;
+}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function tmo(p,ms,n){return Promise.race([p,new Promise(function(_,j){setTimeout(function(){j(new Error(n+': terlalu lama'))},ms)})])}
 
 /* ---------- gambar sumber ---------- */
 function drawable(t){
@@ -117,9 +124,9 @@ async function moveTo(t){curT=t;if(src&&src.kind==='video')await seek(src.el,t);
 
 /* ---------- muat file ---------- */
 $('file').onchange=async function(e){
-  var f=e.target.files[0];if(!f)return;msg('Memuat file...');pan={x:0,y:0};
+  var f=e.target.files[0];if(!f)return;msg('Memuat file...','','a');pan={x:0,y:0};
   try{
-    var u=URL.createObjectURL(f);
+    var u=URL.createObjectURL(f),note='';
     if(f.type.indexOf('video/')===0){
       var v=document.createElement('video');v.muted=true;v.setAttribute('playsinline','');v.preload='auto';v.src=u;
       await new Promise(function(a,b){v.onloadeddata=a;v.onerror=b;v.load()});
@@ -137,14 +144,14 @@ $('file').onchange=async function(e){
       if(!src){
         var im=new Image();im.src=u;await new Promise(function(a,b){im.onload=a;im.onerror=b});
         src={kind:'img',el:im,w:im.naturalWidth,h:im.naturalHeight,dur:0};
-        if(f.type==='image/gif')msg('GIF ini dimuat sebagai gambar diam di perangkat ini. Untuk stiker bergerak, pakai video (MP4/MOV).');
+        if(f.type==='image/gif')note='GIF ini dimuat sebagai gambar diam di perangkat ini. Untuk stiker bergerak, pakai video (MP4/MOV).';
       }
     }
-    var an=src.kind!=='img';$('an').style.display=an?'block':'none';
+    var an=src.kind==='video'||src.kind==='gif';$('an').style.display=an?'block':'none';
     if(an){$('sts').max=Math.max(0,src.dur-1).toFixed(1);$('sts').value=0}
-    if(!(src.kind==='img'&&f.type==='image/gif'))msg('');
+    msg(note,'','a');
     await moveTo(0);
-  }catch(x){msg('File tidak bisa dibuka. Coba file lain (JPG, PNG, GIF, MP4, MOV).','bad')}
+  }catch(x){msg('File tidak bisa dibuka. Coba file lain (JPG, PNG, GIF, MP4, MOV).','bad','a')}
 };
 ['fit','zoom','bord','txt','tsz','tcol','tpos'].forEach(function(i){$(i).oninput=render;$(i).onchange=render});
 $('sts').oninput=function(){moveTo(+this.value)};
@@ -154,11 +161,79 @@ cv.onpointerdown=function(e){dr={x:e.clientX,y:e.clientY};cv.setPointerCapture(e
 cv.onpointermove=function(e){if(!dr)return;var k=512/cv.clientWidth;pan.x+=(e.clientX-dr.x)*k;pan.y+=(e.clientY-dr.y)*k;dr={x:e.clientX,y:e.clientY};render()};
 cv.onpointerup=cv.onpointercancel=function(){dr=null};
 
-/* ---------- encoder WebP ---------- */
+/* ---------- hapus latar (AI, MediaPipe) ---------- */
+var MP='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+var MODEL='https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+async function getSeg(){
+  if(seg)return seg;
+  var M=await tmo(import(MP+'/vision_bundle.mjs'),30000,'AI');
+  var fs=await M.FilesetResolver.forVisionTasks(MP+'/wasm');
+  seg=await tmo(M.ImageSegmenter.createFromOptions(fs,{baseOptions:{modelAssetPath:MODEL,delegate:'CPU'},runningMode:'IMAGE',outputConfidenceMasks:true,outputCategoryMask:false}),40000,'Model');
+  return seg;
+}
+$('cut').onclick=async function(){
+  if(!src){msg('Pilih gambar dulu di langkah 1.','bad','a');return}
+  if(src.kind!=='img'){msg('Hapus latar hanya untuk gambar diam.','bad','a');return}
+  if(src.orig){msg('Latar sudah dihapus. Tekan Kembalikan asli kalau mau mengulang.','','a');return}
+  msg('Memuat AI pemotong... pertama kali bisa 10-20 detik.','','a');
+  try{
+    var sg=await getSeg();
+    var sc=Math.min(1,1024/Math.max(src.w,src.h)),w=Math.round(src.w*sc),h=Math.round(src.h*sc);
+    var c=document.createElement('canvas');c.width=w;c.height=h;var x=c.getContext('2d');x.drawImage(src.el,0,0,w,h);
+    msg('Memotong mengikuti bentuk tubuh...','','a');await sleep(30);
+    var r=sg.segment(c),ms=r.confidenceMasks,m=ms[ms.length-1];
+    var a=new Float32Array(m.getAsFloat32Array()),mw=m.width,mh=m.height,i,bs=0,bn=0;
+    for(i=0;i<mw;i++){bs+=a[i]+a[(mh-1)*mw+i];bn+=2}
+    for(i=0;i<mh;i++){bs+=a[i*mw]+a[i*mw+mw-1];bn+=2}
+    var inv=bs/bn>0.5;
+    var id=x.getImageData(0,0,w,h),p=id.data,cnt=0,x0=w,y0=h,x1=0,y1=0;
+    for(var yy=0;yy<h;yy++)for(var xx=0;xx<w;xx++){
+      var v=a[Math.min(mh-1,Math.floor(yy*mh/h))*mw+Math.min(mw-1,Math.floor(xx*mw/w))];
+      if(inv)v=1-v;v=(v-0.4)/0.3;v=v<0?0:v>1?1:v;
+      p[(yy*w+xx)*4+3]=Math.round(v*255);
+      if(v>0.5){cnt++;if(xx<x0)x0=xx;if(xx>x1)x1=xx;if(yy<y0)y0=yy;if(yy>y1)y1=yy}
+    }
+    var fr=cnt/(w*h);
+    if(fr<0.02||fr>0.97){msg('Orang tidak terdeteksi di gambar ini. Fitur ini paling bagus untuk foto orang yang jelas.','bad','a');return}
+    x.putImageData(id,0,0);
+    x0=Math.max(0,x0-6);y0=Math.max(0,y0-6);x1=Math.min(w-1,x1+6);y1=Math.min(h-1,y1+6);
+    var bw=x1-x0+1,bh=y1-y0+1,o=document.createElement('canvas');o.width=bw;o.height=bh;
+    o.getContext('2d').drawImage(c,x0,y0,bw,bh,0,0,bw,bh);
+    src={kind:'img',el:o,w:bw,h:bh,dur:0,orig:src};
+    pan={x:0,y:0};$('fit').value='fit';$('zoom').value=100;render();
+    msg('Latar terhapus. Kalau hasil kurang pas, tekan Kembalikan asli.','ok','a');
+  }catch(x){msg('Pemotong AI gagal dimuat ('+(x&&x.message?x.message:'error').slice(0,120)+'). Pastikan internet aktif lalu coba lagi.','bad','a')}
+};
+$('unc').onclick=function(){if(src&&src.orig){src=src.orig;pan={x:0,y:0};render();msg('Gambar asli dikembalikan.','','a')}};
+
+/* ---------- encoder WebP (coba beberapa sumber) ---------- */
+var CAND=[
+ ['w','https://cdn.jsdelivr.net/npm/wasm-webp@0.1.0/+esm'],
+ ['w','https://esm.sh/wasm-webp@0.1.0'],
+ ['w','https://cdn.jsdelivr.net/npm/wasm-webp@0.1.0/dist/esm/index.js'],
+ ['j','https://cdn.jsdelivr.net/npm/@jsquash/webp@1.4.0/encode.js'],
+ ['j','https://esm.sh/@jsquash/webp@1.4.0/encode']
+];
 async function getLib(){
   if(lib)return lib;
-  if(libErr)return null;
-  try{lib=await import(LIB);return lib}catch(x){libErr=true;return null}
+  errs=[];
+  for(var i=0;i<CAND.length;i++){
+    var k=CAND[i][0],u=CAND[i][1],host=u.split('/')[2]+(k==='j'?'(jsq)':'');
+    try{
+      var m=await tmo(import(u),25000,host);m=(m&&m.encode)?m:(m&&m.default?m.default:m);
+      if(k==='w'){
+        var o=await tmo(m.encode(new Uint8Array(64),4,4,true,{lossless:0,quality:50}),20000,host);
+        if(!o||!o.length)throw new Error('hasil kosong');
+        lib={enc:function(id,q){return m.encode(id.data,512,512,true,{lossless:0,quality:q})},anim:m.encodeAnimation?function(fs){return m.encodeAnimation(512,512,true,fs)}:null};
+      }else{
+        var o2=await tmo(m.encode(new ImageData(4,4),{quality:50}),20000,host);
+        if(!o2||!o2.byteLength)throw new Error('hasil kosong');
+        lib={enc:async function(id,q){return new Uint8Array(await m.encode(id,{quality:q}))},anim:null};
+      }
+      return lib;
+    }catch(x){errs.push(host+': '+(x&&x.message?x.message:String(x)).slice(0,60))}
+  }
+  return null;
 }
 function nativeWebp(q){
   return new Promise(function(r){cv.toBlob(function(b){
@@ -168,7 +243,7 @@ function nativeWebp(q){
 }
 async function encStatic(id,q){
   var l=await getLib();
-  if(l){return await l.encode(id.data,512,512,true,{lossless:0,quality:q})}
+  if(l)return new Uint8Array(await l.enc(id,q));
   return await nativeWebp(q);
 }
 
@@ -179,20 +254,22 @@ $('go').onclick=async function(){
   if(!src){msg('Pilih gambar atau video dulu di langkah 1.','bad');return}
   busy=true;$('go').textContent='Memproses...';
   try{
-    var anim=src.kind!=='img',lim=anim?500000:100000,out=null;
+    var anim=src.kind==='video'||src.kind==='gif',lim=anim?500000:100000,out=null;
+    msg('Menyiapkan pembuat WebP...');
     if(!anim){
       curT=0;render();var id=cx.getImageData(0,0,512,512);
       var qs=[90,80,70,60,50,40,30,20];
       for(var i=0;i<qs.length&&!out;i++){
         msg('Memampatkan... '+(i+1)+'/'+qs.length);
         var u=await encStatic(id,qs[i]);
-        if(!u){throw new Error('NOENC')}
+        if(!u)throw new Error('NOENC');
         if(u.length<=lim)out=u;
       }
     }else{
-      var l=await getLib();if(!l)throw new Error('NOENC');
-      var fps=10,st=anim?+$('sts').value:0,len=+$('ln').value,n=Math.round(len*fps),fr=[];
-      if(st+len>src.dur){len=Math.max(0.5,src.dur-st);n=Math.round(len*fps)}
+      var l=await getLib();if(!l||!l.anim)throw new Error(l?'NOANIM':'NOENC');
+      var fps=10,st=+$('sts').value,len=+$('ln').value,n,fr=[];
+      if(st+len>src.dur)len=Math.max(0.5,src.dur-st);
+      n=Math.round(len*fps);
       for(var j=0;j<n;j++){
         msg('Mengambil frame '+(j+1)+'/'+n+'...');
         curT=st+j/fps;if(src.kind==='video')await seek(src.el,curT);render();
@@ -203,21 +280,23 @@ $('go').onclick=async function(){
         msg('Memampatkan gerakan... '+(k+1)+'/'+lad.length);await sleep(30);
         var sk=lad[k][0],fs=[];
         for(var m=0;m<fr.length;m+=sk)fs.push({data:fr[m],duration:Math.round(1000/fps*sk),config:{lossless:0,quality:lad[k][1]}});
-        var z=await l.encodeAnimation(512,512,true,fs);
+        var z=await l.anim(fs);
         if(z&&z.length<=lim)out=z;
       }
     }
     if(!out){msg('Stiker masih terlalu besar. Coba durasi lebih pendek, zoom lebih kecil, atau gambar lebih sederhana.','bad')}
-    else{await addItem(out,anim);showRes(out,anim);msg('Stiker jadi ('+Math.round(out.length/1024)+' KB) dan sudah masuk paket di bawah.','ok')}
+    else{await addItem(out,anim);showRes(out);msg('Stiker jadi ('+Math.round(out.length/1024)+' KB) dan sudah masuk paket di bawah.','ok')}
   }catch(x){
-    if(x&&x.message==='NOENC')msg('Pembuat WebP gagal dimuat. Pastikan internet aktif lalu coba lagi.','bad');
-    else msg('Gagal membuat stiker. Coba lagi atau pakai file lain.','bad');
+    var t=x&&x.message;
+    if(t==='NOENC')msg('Pembuat WebP gagal dimuat. Detail: '+errs.join(' | '),'bad');
+    else if(t==='NOANIM')msg('Pembuat WebP yang berhasil dimuat tidak mendukung gerakan. Coba lagi nanti atau pakai stiker gambar dulu.','bad');
+    else msg('Gagal membuat stiker ('+String(t).slice(0,80)+'). Coba lagi atau pakai file lain.','bad');
   }
   busy=false;$('go').textContent='3. Buat Stiker';
   if(src&&src.kind==='video'){await moveTo(+$('sts').value)}else{curT=0;render()}
 };
 function url(u8){return URL.createObjectURL(new Blob([u8],{type:'image/webp'}))}
-function showRes(u8,anim){
+function showRes(u8){
   var u=url(u8);
   $('res').innerHTML='<div class="bub" style="background:#dcf8c6"><img src="'+u+'"></div><div class="bub" style="background:#1f2c34"><img src="'+u+'"></div>';
 }
@@ -288,7 +367,7 @@ $('zipb').onclick=async function(){
   var name=($('pn').value.trim()||'Paket Saya'),files=[];
   c.forEach(function(it,i){files.push({n:('0'+(i+1)).slice(-2)+'.webp',d:it.u8})});
   try{
-    var im=new Image();im.src=cur()[0].url||url(c[0].u8);await new Promise(function(a,b){im.onload=a;im.onerror=b});
+    var im=new Image();im.src=c[0].url||url(c[0].u8);await new Promise(function(a,b){im.onload=a;im.onerror=b});
     var t=document.createElement('canvas');t.width=t.height=96;t.getContext('2d').drawImage(im,0,0,96,96);
     var tb=await new Promise(function(r){t.toBlob(r,'image/png')});
     files.push({n:'tray.png',d:new Uint8Array(await tb.arrayBuffer())});
